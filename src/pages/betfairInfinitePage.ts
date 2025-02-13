@@ -5,21 +5,41 @@ import { BotService } from '../lib/botService';
 
 class BetfairInfinitePage extends InfinitePage {
   public page: Page;
+
+  public isPlayerActive = false;
+
+  public gameOver = false;
+
   public monitoringInterval: NodeJS.Timeout | null = null;
+
   public fakeBetInterval: NodeJS.Timeout | null = null;
+
   public isResetInProgress: boolean = false;
+
   public roundCounter = 0;
+
   public cardCounter: number = 0;
+
   public stopCounter = false;
+
   public previousDealerCards: { cardRole: string; isAppearing: boolean }[] = [];
+
   public previousPlayerCards: (string | null)[] = [];
+
   public revealedCards: string[] = [];
+
   public playerWins = 0;
+
   public dealerWins = 0;
+
   public ties = 0;
+
   public totalRounds = 0;
+
   public last20Results: string[] = [];
+
   public last20WinRate: string = '0.00%';
+
   public gameData: Partial<GameData> = {
     roundNumber: 0,
     playerHand: { cards: [], value: 0 },
@@ -31,9 +51,11 @@ class BetfairInfinitePage extends InfinitePage {
     roundResult: '',
   };
 
-  private selectors = {
-    closeWarningButton: 'body > div.alert-container.show > div.alert-header.info > div.btn-alert-close.show',
-    closeInfoButton: '#root > div > div > div.content--6d02a > div.window--70896 > div > div > h3 > a',
+  public selectors = {
+    closeWarningButton:
+      'body > div.alert-container.show > div.alert-header.info > div.btn-alert-close.show',
+    closeInfoButton:
+      '#root > div > div > div.content--6d02a > div.window--70896 > div > div > h3 > a',
     betButton: 'div.betSpot--216d1:nth-child(3)',
     undoBetButton: 'button[data-role="undo-button"]',
     videoElement: 'video',
@@ -44,37 +66,53 @@ class BetfairInfinitePage extends InfinitePage {
     gameFrame3: '.games-container > iframe:nth-child(1)',
     minBetEnabledClass: 'enabled--7ca22',
     minBetButtonSelector: 'div.betSpot--216d1:nth-child(3)',
-    undoBetButtonSelector:'button[data-role="undo-button"]',
+    undoBetButtonSelector: 'button[data-role="undo-button"]',
     undoBetEnabledClass: 'buttonRoot--3bd4d',
     disabledClass: 'perspectiveIdle--f435b',
+    betButton10:
+      '/html/body/div[4]/div/div/div[2]/div[4]/div/div[4]/div/div[2]/div/div[3]',
+    betButton25:
+      '/html/body/div[4]/div/div/div[2]/div[4]/div/div[4]/div/div[2]/div/div[3]',
+    betButton125:
+      '/html/body/div[4]/div/div/div[2]/div[4]/div/div[4]/div/div[2]/div/div[3]',
+    betButton500:
+      '/html/body/div[4]/div/div/div[2]/div[4]/div/div[4]/div/div[2]/div/div[3]',
+    betButton2500:
+      '/html/body/div[4]/div/div/div[2]/div[4]/div/div[4]/div/div[2]/div/div[3]',
   };
 
-
   constructor(page: Page) {
-    super()
+    super();
     this.page = page;
   }
 
   async closeWarnings(): Promise<void> {
-    await this.hardWait(2000)
+    await this.hardWait(2000);
     try {
-      const firstFrame = await this.getValidatedFirstIframeContent(2000, this.selectors.closeWarningButton);
+      const firstFrame = await this.getValidatedFirstIframeContent(
+        2000,
+        this.selectors.closeWarningButton,
+      );
       await firstFrame.waitForSelector(this.selectors.closeWarningButton);
       await firstFrame.click(this.selectors.closeWarningButton);
 
-
-      const thirdFrame = await this.getValidatedThirdIframeContent(2000, this.selectors.closeInfoButton);
+      const thirdFrame = await this.getValidatedThirdIframeContent(
+        2000,
+        this.selectors.closeInfoButton,
+      );
       await thirdFrame.waitForSelector(this.selectors.closeInfoButton);
       await thirdFrame.click(this.selectors.closeInfoButton);
-
-    } catch (error) {
-    }
+    } catch (error) {}
   }
 
-  async roundManager(): Promise<void> {
+  async roundManager(
+    profile: string,
+    gameMode: string,
+    betValue: string,
+  ): Promise<void> {
     console.log('Iniciando o contador de rodadas...');
-    const disabledClass: string = 'perspectiveIdle--f435b'
-    let intervalTime = 1500
+    const disabledClass: string = 'perspectiveIdle--f435b';
+    let intervalTime = 1500;
 
     if (this.monitoringInterval) {
       console.log('Parando contador de rodadas anterior...');
@@ -87,7 +125,10 @@ class BetfairInfinitePage extends InfinitePage {
 
     const checkButtonAndCountRound = async () => {
       try {
-        const thirdFrame = await this.getValidatedThirdIframeContent(intervalTime, this.selectors.minBetButtonSelector);
+        const thirdFrame = await this.getValidatedThirdIframeContent(
+          intervalTime,
+          this.selectors.minBetButtonSelector,
+        );
         if (!thirdFrame) return;
 
         const isButtonEnabled = await thirdFrame.evaluate(
@@ -101,27 +142,33 @@ class BetfairInfinitePage extends InfinitePage {
 
         if (isButtonEnabled && !isRoundInProgress) {
           this.roundCounter++;
+          this.gameOver = true;
+          await this.evaluateRoundOutcome(profile);
           console.log(`Rodada nº ${this.roundCounter} sendo iniciada`);
           isRoundInProgress = true;
+          const botController = new BotController(this.page);
+          await botController.play(gameMode, betValue);
         } else if (!isButtonEnabled && isRoundInProgress) {
           isRoundInProgress = false;
-          console.log('Período de apostas encerrado, aguardando próxima rodada.');
-
-          await this.evaluateRoundOutcome();
+          this.gameOver = false;
+          console.log(
+            'Período de apostas encerrado, aguardando próxima rodada.',
+          );
         }
       } catch (error) {
         console.error('Erro ao verificar o estado do botão de rodada:', error);
       }
 
       if (!this.stopCounter) {
-        this.monitoringInterval = setTimeout(checkButtonAndCountRound, intervalTime);
+        this.monitoringInterval = setTimeout(
+          checkButtonAndCountRound,
+          intervalTime,
+        );
       }
     };
 
-
     await checkButtonAndCountRound();
   }
-
 
   cardMonitor(intervalTime = 2000): void {
     if (this.monitoringInterval) {
@@ -135,22 +182,25 @@ class BetfairInfinitePage extends InfinitePage {
     }, intervalTime);
   }
 
-
   keepAlive(): void {
     const intervalTime = 5 * 60 * 1000;
 
     this.fakeBetInterval = setInterval(async () => {
       if (this.isResetInProgress) {
-        console.log("Reset em progresso. Ciclo de apostas falsas pausado.");
+        console.log('Reset em progresso. Ciclo de apostas falsas pausado.');
         return;
       }
 
-      console.log('Verificando se o período de apostas está inativo para realizar aposta falsa...');
+      console.log(
+        'Verificando se o período de apostas está inativo para realizar aposta falsa...',
+      );
       try {
         const isBettingInactive = await this.isBettingPeriodInactive();
 
         if (isBettingInactive) {
-          console.log('Período de apostas inativo. Executando aposta falsa para manter a conexão ativa...');
+          console.log(
+            'Período de apostas inativo. Executando aposta falsa para manter a conexão ativa...',
+          );
           await this.clickMinBetButton();
           await this.clickUndoBetButton();
           console.log('Aposta falsa realizada com sucesso.');
@@ -158,7 +208,10 @@ class BetfairInfinitePage extends InfinitePage {
           console.log('Período de apostas ativo. Aposta falsa não realizada.');
         }
       } catch (error) {
-        console.error('Erro ao realizar a verificação ou a aposta falsa:', error);
+        console.error(
+          'Erro ao realizar a verificação ou a aposta falsa:',
+          error,
+        );
       }
     }, intervalTime);
   }
@@ -220,7 +273,9 @@ class BetfairInfinitePage extends InfinitePage {
 
       const iframeContent = await iframeElement.contentFrame();
       if (!iframeContent || iframeContent.isDetached()) {
-        console.warn(`Frame desconectado ou inacessível para o seletor: ${selector}`);
+        console.warn(
+          `Frame desconectado ou inacessível para o seletor: ${selector}`,
+        );
         return null;
       }
 
@@ -304,7 +359,10 @@ class BetfairInfinitePage extends InfinitePage {
         );
       }
     } catch (error) {
-      console.error('Erro ao capturar as cartas do dealer ou do jogador:', error);
+      console.error(
+        'Erro ao capturar as cartas do dealer ou do jogador:',
+        error,
+      );
     }
   }
 
@@ -410,24 +468,34 @@ class BetfairInfinitePage extends InfinitePage {
 
   async isBettingPeriodInactive(): Promise<boolean> {
     try {
-      const thirdFrame = await this.getValidatedThirdIframeContent(5000, this.selectors.minBetButtonSelector);
+      const thirdFrame = await this.getValidatedThirdIframeContent(
+        5000,
+        this.selectors.minBetButtonSelector,
+      );
       if (!thirdFrame) return false;
 
-      const isInactive = await thirdFrame.evaluate((minBetButtonSelector, disabledClass) => {
-        const betButton = document.querySelector(minBetButtonSelector);
-        return betButton && betButton.classList.contains(disabledClass);
-      }, this.selectors.minBetButtonSelector, this.selectors.disabledClass);
+      const isInactive = await thirdFrame.evaluate(
+        (minBetButtonSelector, disabledClass) => {
+          const betButton = document.querySelector(minBetButtonSelector);
+          return betButton && betButton.classList.contains(disabledClass);
+        },
+        this.selectors.minBetButtonSelector,
+        this.selectors.disabledClass,
+      );
 
       return isInactive;
     } catch (error) {
-      console.error('Erro ao verificar o estado do botão de aposta mínima:', error);
+      console.error(
+        'Erro ao verificar o estado do botão de aposta mínima:',
+        error,
+      );
       return false;
     }
   }
 
-  async evaluateRoundOutcome(): Promise<void> {
+  async evaluateRoundOutcome(profile: string): Promise<void> {
     const playerCards = this.previousPlayerCards.filter(
-      (card) => card !== null
+      (card) => card !== null,
     ) as string[];
     const dealerCards = this.previousDealerCards
       .map((card) => card.cardRole)
@@ -437,8 +505,10 @@ class BetfairInfinitePage extends InfinitePage {
     const dealerHandValue = await this.calculateHandValue(dealerCards);
     const result = await this.determineRoundWinner(playerCards, dealerCards);
 
-    const outcome = result.includes('Player wins') ? 'Win'
-      : result.includes('Empate') ? 'Tie'
+    const outcome = result.includes('Player wins')
+      ? 'Win'
+      : result.includes('Empate')
+        ? 'Tie'
         : 'Loss';
 
     this.last20Results.push(outcome);
@@ -447,36 +517,87 @@ class BetfairInfinitePage extends InfinitePage {
     }
 
     const winsLast20 = this.last20Results.filter((r) => r === 'Win').length;
-    this.last20WinRate = ((winsLast20 / this.last20Results.length) * 100).toFixed(2);
+    this.last20WinRate = (
+      (winsLast20 / this.last20Results.length) *
+      100
+    ).toFixed(2);
 
     const botController = new BotController(this.page);
     await botController.updateGameData({
       roundNumber: this.roundCounter,
       gameId: this.gameData.gameId ?? `game_${Date.now()}`,
+      profile: profile,
       playerHand: { cards: playerCards, value: playerHandValue },
       dealerHand: { cards: dealerCards, value: dealerHandValue },
       revealedCards: [...this.revealedCards],
       playerWins: this.playerWins,
       dealerWins: this.dealerWins,
       ties: this.ties,
-      playerWinRate: ((this.playerWins / this.totalRounds) * 100).toFixed(2) + '%',
-      dealerWinRate: ((this.dealerWins / this.totalRounds) * 100).toFixed(2) + '%',
+      playerWinRate:
+        ((this.playerWins / this.totalRounds) * 100).toFixed(2) + '%',
+      dealerWinRate:
+        ((this.dealerWins / this.totalRounds) * 100).toFixed(2) + '%',
       tieRate: ((this.ties / this.totalRounds) * 100).toFixed(2) + '%',
       roundResult: result,
       last20Results: [...this.last20Results],
       last20WinRate: this.last20WinRate + '%',
-      callbackUrl: 'http://127.0.0.1:3000/callback',
     });
   }
 
-
-
   getCardValue(card: string): number {
     const valueMap: { [key: string]: number } = {
-      'card-S2': 2, 'card-S3': 3, 'card-S4': 4, 'card-S5': 5, 'card-S6': 6, 'card-S7': 7, 'card-S8': 8, 'card-S9': 9, 'card-S10': 10, 'card-SK': 10, 'card-SQ': 10, 'card-SJ': 10, 'card-SA': 11,
-      'card-H2': 2, 'card-H3': 3, 'card-H4': 4, 'card-H5': 5, 'card-H6': 6, 'card-H7': 7, 'card-H8': 8, 'card-H9': 9, 'card-H10': 10, 'card-HK': 10, 'card-HQ': 10, 'card-HJ': 10, 'card-HA': 11,
-      'card-C2': 2, 'card-C3': 3, 'card-C4': 4, 'card-C5': 5, 'card-C6': 6, 'card-C7': 7, 'card-C8': 8, 'card-C9': 9, 'card-C10': 10, 'card-CK': 10, 'card-CQ': 10, 'card-CJ': 10, 'card-CA': 11,
-      'card-D2': 2, 'card-D3': 3, 'card-D4': 4, 'card-D5': 5, 'card-D6': 6, 'card-D7': 7, 'card-D8': 8, 'card-D9': 9, 'card-D10': 10, 'card-DK': 10, 'card-DQ': 10, 'card-DJ': 10, 'card-DA': 11,
+      'card-S2': 2,
+      'card-S3': 3,
+      'card-S4': 4,
+      'card-S5': 5,
+      'card-S6': 6,
+      'card-S7': 7,
+      'card-S8': 8,
+      'card-S9': 9,
+      'card-S10': 10,
+      'card-SK': 10,
+      'card-SQ': 10,
+      'card-SJ': 10,
+      'card-SA': 11,
+      'card-H2': 2,
+      'card-H3': 3,
+      'card-H4': 4,
+      'card-H5': 5,
+      'card-H6': 6,
+      'card-H7': 7,
+      'card-H8': 8,
+      'card-H9': 9,
+      'card-H10': 10,
+      'card-HK': 10,
+      'card-HQ': 10,
+      'card-HJ': 10,
+      'card-HA': 11,
+      'card-C2': 2,
+      'card-C3': 3,
+      'card-C4': 4,
+      'card-C5': 5,
+      'card-C6': 6,
+      'card-C7': 7,
+      'card-C8': 8,
+      'card-C9': 9,
+      'card-C10': 10,
+      'card-CK': 10,
+      'card-CQ': 10,
+      'card-CJ': 10,
+      'card-CA': 11,
+      'card-D2': 2,
+      'card-D3': 3,
+      'card-D4': 4,
+      'card-D5': 5,
+      'card-D6': 6,
+      'card-D7': 7,
+      'card-D8': 8,
+      'card-D9': 9,
+      'card-D10': 10,
+      'card-DK': 10,
+      'card-DQ': 10,
+      'card-DJ': 10,
+      'card-DA': 11,
     };
 
     return valueMap[card] || 0;
@@ -500,13 +621,25 @@ class BetfairInfinitePage extends InfinitePage {
     return total;
   }
 
-  async determineRoundWinner(playerCards: string[], dealerCards: string[]): Promise<string> {
-    const result = await this.originalDetermineRoundWinner(playerCards, dealerCards);
+  async determineRoundWinner(
+    playerCards: string[],
+    dealerCards: string[],
+  ): Promise<string> {
+    const result = await this.originalDetermineRoundWinner(
+      playerCards,
+      dealerCards,
+    );
 
     this.gameData = {
       roundNumber: this.roundCounter,
-      playerHand: { cards: playerCards, value: await this.calculateHandValue(playerCards) },
-      dealerHand: { cards: dealerCards, value: await this.calculateHandValue(dealerCards) },
+      playerHand: {
+        cards: playerCards,
+        value: await this.calculateHandValue(playerCards),
+      },
+      dealerHand: {
+        cards: dealerCards,
+        value: await this.calculateHandValue(dealerCards),
+      },
       revealedCards: this.revealedCards,
       playerWins: this.playerWins,
       dealerWins: this.dealerWins,
@@ -517,16 +650,63 @@ class BetfairInfinitePage extends InfinitePage {
     return result;
   }
 
-
   async originalDetermineRoundWinner(
     playerCards: string[],
     dealerCards: string[],
   ): Promise<string> {
     const valueMap: { [key: string]: number } = {
-      'card-S2': 2, 'card-S3': 3, 'card-S4': 4, 'card-S5': 5, 'card-S6': 6, 'card-S7': 7, 'card-S8': 8, 'card-S9': 9, 'card-S10': 10, 'card-SK': 10, 'card-SQ': 10, 'card-SJ': 10, 'card-SA': 11,
-      'card-H2': 2, 'card-H3': 3, 'card-H4': 4, 'card-H5': 5, 'card-H6': 6, 'card-H7': 7, 'card-H8': 8, 'card-H9': 9, 'card-H10': 10, 'card-HK': 10, 'card-HQ': 10, 'card-HJ': 10, 'card-HA': 11,
-      'card-C2': 2, 'card-C3': 3, 'card-C4': 4, 'card-C5': 5, 'card-C6': 6, 'card-C7': 7, 'card-C8': 8, 'card-C9': 9, 'card-C10': 10, 'card-CK': 10, 'card-CQ': 10, 'card-CJ': 10, 'card-CA': 11,
-      'card-D2': 2, 'card-D3': 3, 'card-D4': 4, 'card-D5': 5, 'card-D6': 6, 'card-D7': 7, 'card-D8': 8, 'card-D9': 9, 'card-D10': 10, 'card-DK': 10, 'card-DQ': 10, 'card-DJ': 10, 'card-DA': 11,
+      'card-S2': 2,
+      'card-S3': 3,
+      'card-S4': 4,
+      'card-S5': 5,
+      'card-S6': 6,
+      'card-S7': 7,
+      'card-S8': 8,
+      'card-S9': 9,
+      'card-S10': 10,
+      'card-SK': 10,
+      'card-SQ': 10,
+      'card-SJ': 10,
+      'card-SA': 11,
+      'card-H2': 2,
+      'card-H3': 3,
+      'card-H4': 4,
+      'card-H5': 5,
+      'card-H6': 6,
+      'card-H7': 7,
+      'card-H8': 8,
+      'card-H9': 9,
+      'card-H10': 10,
+      'card-HK': 10,
+      'card-HQ': 10,
+      'card-HJ': 10,
+      'card-HA': 11,
+      'card-C2': 2,
+      'card-C3': 3,
+      'card-C4': 4,
+      'card-C5': 5,
+      'card-C6': 6,
+      'card-C7': 7,
+      'card-C8': 8,
+      'card-C9': 9,
+      'card-C10': 10,
+      'card-CK': 10,
+      'card-CQ': 10,
+      'card-CJ': 10,
+      'card-CA': 11,
+      'card-D2': 2,
+      'card-D3': 3,
+      'card-D4': 4,
+      'card-D5': 5,
+      'card-D6': 6,
+      'card-D7': 7,
+      'card-D8': 8,
+      'card-D9': 9,
+      'card-D10': 10,
+      'card-DK': 10,
+      'card-DQ': 10,
+      'card-DJ': 10,
+      'card-DA': 11,
     };
 
     function calculateHandValue(cards: string[]): number {
@@ -628,22 +808,59 @@ class BetfairInfinitePage extends InfinitePage {
     console.log(`Cartas reveladas: ${this.revealedCards.join(', ')}`);
   }
 
-  placeBet() {
+  async playerMove(gameData: GameData) {
+    const botService = new BotService();
 
+    if (!this.isPlayerActive) {
+      console.log('⏭️ Skipping move: Player did not place a bet.');
+      return;
+    }
+
+    const action = await botService.decideAction(gameData);
+
+    if (action === 'HIT') {
+      console.log('🃏 AI says HIT. Clicking hit button...');
+      await this.page.click(this.selectors.hitButton);
+    } else {
+      console.log('✋ AI says STAND. Clicking stand button...');
+      await this.page.click(this.selectors.standButton);
+    }
+
+    this.isPlayerActive = false;
   }
 
-  selectBet() {
+  async selectBet(betValue: string) {
+    const botService = new BotService();
 
+    if (this.gameOver) {
+      const strategy = await botService.getStrategy();
+      let betButton = '';
+
+      if (strategy === 'PLAY') {
+        console.log('✅ Strategy says PLAY. Placing bet...');
+
+        if (betValue === '5') betButton = this.selectors.minBetButtonSelector;
+        else if (betValue === '10') betButton = this.selectors.betButton10;
+        else if (betValue === '25') betButton = this.selectors.betButton25;
+        else if (betValue === '125') betButton = this.selectors.betButton125;
+        else if (betValue === '500') betButton = this.selectors.betButton500;
+        else if (betValue === '2500') betButton = this.selectors.betButton2500;
+
+        if (betButton) {
+          await this.page.waitForSelector(betButton);
+          await this.page.click(betButton);
+          console.log(`🎰 Bet placed: ${betValue}`);
+
+          this.isPlayerActive = true;
+        }
+      } else {
+        console.log('🚫 Strategy says SKIP. Waiting for next round...');
+        this.isPlayerActive = false;
+      }
+    } else {
+      console.log('🚫 Game is running...');
+    }
   }
-
-  playerHit() {
-
-  }
-
-  playerStand() {
-
-  }
-
 
   hardWait(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));

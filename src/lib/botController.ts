@@ -1,5 +1,5 @@
 import { Page } from 'puppeteer';
-import BetfairNavigationPage from '../pages/betfairNavigationPage';
+import BetfairCasinoPage from '../pages/betfairCasinoPage';
 import SportingBetNavigationPage from '../pages/sportingBetNavigationPage';
 import BetfairInfinitePage from '../pages/betfairInfinitePage';
 import CasinoPage from '../pages/casinoPage';
@@ -10,7 +10,7 @@ import { BotService } from './botService';
 export interface GameData {
   roundNumber: number;
   gameId : string;
-  callbackUrl: string;
+  profile: string;
   playerHand: {
     cards: string[];
     value: number;
@@ -53,6 +53,7 @@ export default class BotController {
     this.page = page;
     this.gameData = {
       roundNumber: 0,
+      profile: "",
       playerHand: { cards: [], value: 0 },
       dealerHand: { cards: [], value: 0 },
       revealedCards: [],
@@ -76,7 +77,7 @@ export default class BotController {
 
     try {
       if (casino === 'betfair') {
-        casinoPage = new BetfairNavigationPage(this.page);
+        casinoPage = new BetfairCasinoPage(this.page);
         login = this.casinos.betfair.email;
         password = this.casinos.betfair.password;
       } else if (casino === 'sportingBet') {
@@ -98,7 +99,7 @@ export default class BotController {
     }
   }
 
-  async startMonitor(gameMode: string) {
+  async startMonitor(gameMode: string, profile: string, betValue: string) {
     let infinitePage: InfinitePage;
 
     try {
@@ -113,7 +114,7 @@ export default class BotController {
       }
 
       infinitePage.closeWarnings();
-      infinitePage.roundManager();
+      infinitePage.roundManager(profile, gameMode, betValue);
       infinitePage.cardMonitor();
       infinitePage.keepAlive();
 
@@ -143,5 +144,27 @@ export default class BotController {
     }
   }
 
+  async play(gameMode: string, betValue: string) {
+    let infinitePage: InfinitePage;
 
+    try {
+      if (gameMode === 'infiniteBetfair') {
+        infinitePage = new BetfairInfinitePage(this.page);
+      } else if (gameMode === 'infiniteSportingBet') {
+        infinitePage = new SportingBetInfinitePage(this.page);
+      } else {
+        throw new Error('Unsupported casino or game mode type.');
+      }
+
+      infinitePage.selectBet(betValue);
+
+      if (infinitePage.isPlayerActive) {
+        infinitePage.playerMove(this.gameData);
+      }
+
+    } catch (error) {
+      console.error('[Error] Error during play execution:', error);
+      throw error;
+    }
+  }
 }

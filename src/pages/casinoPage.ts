@@ -8,6 +8,7 @@ abstract class CasinoPage {
   abstract login(username: string, password: string): void;
   abstract searchGame(): void;
   abstract selectGame(): void;
+
 }
 
 export default CasinoPage;

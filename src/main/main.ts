@@ -4,8 +4,7 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-// @ts-ignore
-import { Puppeteer } from '../lib/puppeteer.ts';
+import { Puppeteer } from '../lib/puppeteer';
 import GameSettings from '../lib/gameSettings';
 import BotController from '../lib/botController';
 
@@ -24,9 +23,8 @@ let screenResolution: { width: number; height: number } | null = null;
 const CHECK_INTERVAL = 15 * 60 * 1000;
 const RECHECK_INTERVAL = 60 * 1000;
 
-
 const getScreenResolution = (): { width: number; height: number } => {
-  const { screen } = require('electron');
+  // const { screen } = require('electron');
   const display = screen.getPrimaryDisplay();
   return {
     width: display.bounds.width,
@@ -34,29 +32,14 @@ const getScreenResolution = (): { width: number; height: number } => {
   };
 };
 
-
-async function startGame(casino: string, gameMode: string) {
-  screenResolution = getScreenResolution();
-  const puppeteer = new Puppeteer();
-
-  try {
-    currentBrowser = await puppeteer.createBrowser();
-    currentPage = await puppeteer.getPage(currentBrowser, screenResolution);
-
-    const gameSettings = new GameSettings(currentPage);
-    await gameSettings.gameSetup(casino, gameMode);
-    await gameSettings.gamePlay(gameMode);
-
-    scheduleRestart(casino, gameMode);
-
-  } catch (error) {
-    console.error('Error during initial game setup:', error);
-  }
-}
-
-function scheduleRestart(casino: string, gameMode: string) {
+function scheduleRestart(
+  casino: string,
+  gameMode: string,
+  betValue: string,
+  profile: string,
+) {
   setTimeout(async function attemptRestart() {
-    const botController = new BotController(currentPage)
+    const botController = new BotController(currentPage);
 
     if (botController.isPlayerActive) {
       console.log('Player is active, delaying restart...');
@@ -72,8 +55,8 @@ function scheduleRestart(casino: string, gameMode: string) {
       const newPage = await puppeteer.getPage(newBrowser, screenResolution);
 
       const newGameSettings = new GameSettings(newPage);
-      await newGameSettings.gameSetup(casino, gameMode);
-      await newGameSettings.gamePlay(gameMode);
+      await newGameSettings.gameSetup(casino, gameMode, profile, betValue);
+      await newGameSettings.gamePlay(gameMode, betValue);
 
       if (currentBrowser) {
         await currentBrowser.close();
@@ -91,6 +74,28 @@ function scheduleRestart(casino: string, gameMode: string) {
   }, CHECK_INTERVAL);
 }
 
+async function startGame(
+  casino: string,
+  gameMode: string,
+  betValue: string,
+  profile: string,
+) {
+  screenResolution = getScreenResolution();
+  const puppeteer = new Puppeteer();
+
+  try {
+    currentBrowser = await puppeteer.createBrowser();
+    currentPage = await puppeteer.getPage(currentBrowser, screenResolution);
+
+    const gameSettings = new GameSettings(currentPage);
+    await gameSettings.gameSetup(casino, gameMode, profile, betValue);
+    await gameSettings.gamePlay(gameMode, betValue);
+
+    scheduleRestart(casino, gameMode, betValue, profile);
+  } catch (error) {
+    console.error('Error during initial game setup:', error);
+  }
+}
 
 ipcMain.on(
   'login-attempt',
@@ -101,8 +106,10 @@ ipcMain.on(
       console.log('Login bem-sucedido.');
       const casino = 'betfair';
       const gameMode = 'infiniteBetfair';
+      const betValue = '10';
+      const profile = 'agressive';
 
-      await startGame(casino, gameMode);
+      await startGame(casino, gameMode, betValue, profile);
 
       event.reply('login-success');
     } else {

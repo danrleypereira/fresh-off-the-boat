@@ -1,7 +1,7 @@
 import { Page } from 'puppeteer';
 import CasinoPage from './casinoPage';
 
-class BetfairNavigationPage extends CasinoPage {
+class BetfairCasinoPage extends CasinoPage {
   public page: Page;
   public url: string = 'https://casino.betfair.bet.br/'
 
@@ -11,7 +11,7 @@ class BetfairNavigationPage extends CasinoPage {
     this.page.goto(this.url, { waitUntil: 'networkidle2' });
   }
 
-  private selectors = {
+  public selectors = {
     acceptCookiesButton: '#onetrust-reject-all-handler',
     overlay: '.onetrust-pc-dark-filter',
     loginInput: '#ssc-liu',
@@ -63,4 +63,4 @@ class BetfairNavigationPage extends CasinoPage {
   }
 }
 
-export default BetfairNavigationPage;
+export default BetfairCasinoPage;

@@ -9,15 +9,15 @@ export default class GameSettings {
     this.page = page;
   }
 
-  async gameSetup(casino: string, gameMode: string) {
+  async gameSetup(casino: string, gameMode: string, profile: string, betValue: string) {
     const botController = new BotController(this.page);
     await botController.casinoNavigation(casino);
-    await botController.startMonitor(gameMode);
+    await botController.startMonitor(gameMode, profile, betValue);
   }
 
-  async gamePlay(gameMode: string) {
+  async gamePlay(gameMode: string, betValue: string) {
     const botController = new BotController(this.page);
-
+    await botController.play(gameMode, betValue);
 
   }
 }
