@@ -1,19 +1,13 @@
-/* eslint global-require: off, no-console: off, promise/always-return: off */
-
-/**
- * This module executes inside of electron's main process. You can start
- * electron renderer process from here and communicate with the other processes
- * through IPC.
- *
- * When running `npm run build` or `npm run build:main`, this file is compiled to
- * `./src/main.js` using webpack. This gives us some performance wins.
- */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, screen } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+// @ts-ignore
+import { Puppeteer } from '../lib/puppeteer.ts';
+import GameSettings from '../lib/gameSettings';
+import BotController from '../lib/botController';
 
 class AppUpdater {
   constructor() {
@@ -24,12 +18,97 @@ class AppUpdater {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let currentBrowser: any = null;
+let currentPage: any = null;
+let screenResolution: { width: number; height: number } | null = null;
+const CHECK_INTERVAL = 15 * 60 * 1000;
+const RECHECK_INTERVAL = 60 * 1000;
 
-ipcMain.on('ipc-example', async (event, arg) => {
-  const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
-  console.log(msgTemplate(arg));
-  event.reply('ipc-example', msgTemplate('pong'));
-});
+
+const getScreenResolution = (): { width: number; height: number } => {
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  return {
+    width: display.bounds.width,
+    height: display.bounds.height,
+  };
+};
+
+
+async function startGame(casino: string, gameMode: string) {
+  screenResolution = getScreenResolution();
+  const puppeteer = new Puppeteer();
+
+  try {
+    currentBrowser = await puppeteer.createBrowser();
+    currentPage = await puppeteer.getPage(currentBrowser, screenResolution);
+
+    const gameSettings = new GameSettings(currentPage);
+    await gameSettings.gameSetup(casino, gameMode);
+    await gameSettings.gamePlay(gameMode);
+
+    scheduleRestart(casino, gameMode);
+
+  } catch (error) {
+    console.error('Error during initial game setup:', error);
+  }
+}
+
+function scheduleRestart(casino: string, gameMode: string) {
+  setTimeout(async function attemptRestart() {
+    const botController = new BotController(currentPage)
+
+    if (botController.isPlayerActive) {
+      console.log('Player is active, delaying restart...');
+      setTimeout(attemptRestart, RECHECK_INTERVAL);
+      return;
+    }
+
+    console.log('Restarting game...');
+
+    try {
+      const puppeteer = new Puppeteer();
+      const newBrowser = await puppeteer.createBrowser();
+      const newPage = await puppeteer.getPage(newBrowser, screenResolution);
+
+      const newGameSettings = new GameSettings(newPage);
+      await newGameSettings.gameSetup(casino, gameMode);
+      await newGameSettings.gamePlay(gameMode);
+
+      if (currentBrowser) {
+        await currentBrowser.close();
+      }
+
+      currentBrowser = newBrowser;
+      currentPage = newPage;
+
+      setTimeout(attemptRestart, CHECK_INTERVAL);
+    } catch (error) {
+      console.error('Error during restart process:', error);
+
+      setTimeout(attemptRestart, RECHECK_INTERVAL);
+    }
+  }, CHECK_INTERVAL);
+}
+
+
+ipcMain.on(
+  'login-attempt',
+  async (event, { login, password }: { login: string; password: string }) => {
+    console.log(`Recebido login-attempt com: ${login} ${password}`);
+
+    if ((login === 'admin' && password === 'admin') || true) {
+      console.log('Login bem-sucedido.');
+      const casino = 'betfair';
+      const gameMode = 'infiniteBetfair';
+
+      await startGame(casino, gameMode);
+
+      event.reply('login-success');
+    } else {
+    }
+  },
+);
 
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
@@ -50,7 +129,7 @@ const installExtensions = async () => {
 
   return installer
     .default(
-      extensions.map((name) => installer[name]),
+      extensions.map((name: string) => installer[name]),
       forceDownload,
     )
     .catch(console.log);
@@ -101,14 +180,11 @@ const createWindow = async () => {
   const menuBuilder = new MenuBuilder(mainWindow);
   menuBuilder.buildMenu();
 
-  // Open urls in the user's browser
   mainWindow.webContents.setWindowOpenHandler((edata) => {
     shell.openExternal(edata.url);
     return { action: 'deny' };
   });
 
-  // Remove this if your app does not use auto updates
-  // eslint-disable-next-line
   new AppUpdater();
 };
 
@@ -117,8 +193,6 @@ const createWindow = async () => {
  */
 
 app.on('window-all-closed', () => {
-  // Respect the OSX convention of having the application in memory even
-  // after all windows have been closed
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -129,8 +203,6 @@ app
   .then(() => {
     createWindow();
     app.on('activate', () => {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
       if (mainWindow === null) createWindow();
     });
   })
